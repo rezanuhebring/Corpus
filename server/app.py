@@ -8,8 +8,11 @@ from werkzeug.utils import secure_filename
 
 # --- App Initialization ---
 app = Flask(__name__)
+# Load configuration from environment variables
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
 app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.environ.get('POSTGRES_USER')}:{os.environ.get('POSTGRES_PASSWORD')}@db/{os.environ.get('POSTGRES_DB')}"
+app.config['API_KEY'] = os.environ.get('API_KEY') # Make API Key accessible in the app config
+
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 model = pickle.load(open('model.pkl', 'rb'))
@@ -31,7 +34,9 @@ class Document(db.Model):
 # --- Authentication ---
 @app.before_request
 def require_login():
+    # Define routes that don't require login
     allowed_routes = ['login', 'static', 'api_upload']
+    # If the user is not logged in and is trying to access a protected route
     if 'user_id' not in session and request.endpoint not in allowed_routes:
         return redirect(url_for('login'))
 
@@ -42,6 +47,7 @@ def login():
         if user and bcrypt.check_password_hash(user.password, request.form['password']):
             session['user_id'] = user.id
             return redirect(url_for('dashboard'))
+        # You might want to add an error message for failed logins here
     return render_template('login.html')
 
 @app.route('/logout')
@@ -53,13 +59,17 @@ def logout():
 @app.route('/')
 def dashboard():
     documents = Document.query.order_by(Document.created_at.desc()).all()
-    return render_template('dashboard.html', documents=documents)
+    # --- THIS IS THE FIX ---
+    # We pass the entire app.config object to the template.
+    # This makes all config variables, including API_KEY, available in the HTML.
+    return render_template('dashboard.html', documents=documents, config=app.config)
 
 # --- API for Agents ---
 @app.route('/api/v1/upload', methods=['POST'])
 def api_upload():
     api_key = request.headers.get('X-API-Key')
-    if not api_key or not secrets.compare_digest(api_key, os.environ.get('API_KEY')):
+    # Use the app.config value for comparison
+    if not api_key or not secrets.compare_digest(api_key, app.config['API_KEY']):
         return jsonify({"error": "Unauthorized"}), 401
     
     file = request.files.get('document')
@@ -67,20 +77,22 @@ def api_upload():
         return jsonify({"error": "No document file provided"}), 400
     
     # Process the file in a background thread to not block the agent
-    thread = threading.Thread(target=process_document, args=(file.read(), file.filename))
+    # We pass the file content and filename to the thread
+    thread = threading.Thread(target=process_document, args=(file.read(), file.filename, app._get_current_object()))
     thread.start()
     
     return jsonify({"status": "received", "filename": file.filename}), 202
 
-def process_document(file_content, filename):
-    with app.app_context():
+def process_document(file_content, filename, app_context):
+    # The background thread needs the application context to work with the database
+    with app_context.app_context():
         # 1. Extract content with Tika
         tika_url = os.environ.get('TIKA_SERVER_URL', 'http://tika:9998/tika')
         try:
             response = requests.put(tika_url, data=file_content, headers={"Accept": "text/plain"})
             response.raise_for_status()
             text_content = response.text.strip()
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             print(f"Tika processing failed for {filename}: {e}")
             return
 
@@ -111,4 +123,5 @@ def init_db_command():
             print("Admin user already exists.")
 
 if __name__ == '__main__':
+    # This block is for direct execution, e.g., 'python app.py'
     app.run(host='0.0.0.0', port=5000)
