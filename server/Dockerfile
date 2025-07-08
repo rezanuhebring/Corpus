@@ -12,9 +12,9 @@ RUN pip install --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- THIS IS THE DEFINITIVE FIX ---
+# --- THIS IS THE CRITICAL FIX ---
 # Pre-download and cache the sentence-transformer model during the build.
-# This prevents rate-limiting errors and makes the application start much faster.
+# This prevents the "429 Too Many Requests" error at runtime.
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 # --- END OF FIX ---
 
