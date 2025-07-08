@@ -1,4 +1,4 @@
-# /docker-compose.yml
+# /docker-compose.yml (Definitive, Corrected Version for AI/Ollama)
 
 services:
   nginx:
@@ -35,8 +35,12 @@ services:
     ports:
       - "9998:9998"
     healthcheck:
+      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
-      interval: 15s; timeout: 10s; retries: 10; start_period: 60s
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   db:
     image: postgres:15
@@ -47,8 +51,11 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
+      # --- CORRECTED FORMAT ---
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s; timeout: 5s; retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   chroma:
     image: chromadb/chroma
@@ -58,8 +65,11 @@ services:
     volumes:
       - chroma_data:/chroma/.chroma/index
     healthcheck:
+      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s; timeout: 5s; retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   ollama:
     image: ollama/ollama
@@ -69,8 +79,11 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
+      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:11434/"]
-      interval: 30s; timeout: 10s; retries: 5
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   # This one-time service downloads the model and then exits.
   ollama-model-puller:
