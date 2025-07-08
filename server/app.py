@@ -1,4 +1,4 @@
-# /server/app.py (Final Corrected Version)
+# /server/app.py (Final Definitive Version)
 
 import os, pickle, requests, threading, secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
@@ -7,13 +7,21 @@ from flask_bcrypt import Bcrypt
 
 # --- App Initialization ---
 app = Flask(__name__)
+
+# --- THIS IS THE DEFINITIVE FIX ---
+# Load configuration from environment variables set by docker-compose and .env
+# This makes them available everywhere in the app, including in templates via the 'config' object.
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
+app.config['API_KEY'] = os.environ.get('API_KEY', 'API_KEY_NOT_SET_IN_DOTENV') # Add our API Key to the config
 app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.environ.get('POSTGRES_USER')}:{os.environ.get('POSTGRES_PASSWORD')}@db/{os.environ.get('POSTGRES_DB')}"
+# --- END OF FIX ---
+
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 model = pickle.load(open('model.pkl', 'rb'))
 
-# --- Database Models ---
+
+# --- Database Models (Unchanged) ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -27,7 +35,8 @@ class Document(db.Model):
     category = db.Column(db.String(120), nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-# --- Authentication ---
+
+# --- Authentication (Unchanged) ---
 @app.before_request
 def require_login():
     allowed_routes = ['login', 'static', 'api_upload']
@@ -48,14 +57,15 @@ def logout():
     session.pop('user_id', None)
     return redirect(url_for('login'))
 
-# --- Main Dashboard (CORRECTED) ---
+
+# --- Main Dashboard (Now Simplified) ---
 @app.route('/')
 def dashboard():
-    # Pass the API_KEY from the environment to the template
+    # We no longer need to pass the api_key here, because the template can
+    # access it directly from the app's config object.
     documents = Document.query.order_by(Document.created_at.desc()).limit(100).all()
-    # THIS IS THE FIX: We read the API_KEY from the environment and pass it to the template.
-    api_key_from_env = os.environ.get('API_KEY', 'API_KEY not set in .env file')
-    return render_template('dashboard.html', documents=documents, api_key=api_key_from_env)
+    return render_template('dashboard.html', documents=documents)
+
 
 # --- API and Background Processing (Unchanged from last fix) ---
 def process_document(app_context, file_content, filename, agent_name):
@@ -79,8 +89,11 @@ def process_document(app_context, file_content, filename, agent_name):
 
 @app.route('/api/v1/upload', methods=['POST'])
 def api_upload():
-    api_key = request.headers.get('X-API-Key')
-    if not api_key or not secrets.compare_digest(api_key, os.environ.get('API_KEY')):
+    # We use app.config here as well for consistency
+    api_key_from_config = app.config.get('API_KEY')
+    api_key_from_header = request.headers.get('X-API-Key')
+    
+    if not api_key_from_header or not secrets.compare_digest(api_key_from_header, api_key_from_config):
         return jsonify({"error": "Unauthorized"}), 401
     
     file = request.files.get('document')
@@ -94,6 +107,7 @@ def api_upload():
     thread.start()
     
     return jsonify({"status": "received", "filename": filename}), 202
+
 
 # --- One-time setup command (Unchanged) ---
 @app.cli.command("init-db")
