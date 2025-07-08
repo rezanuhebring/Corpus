@@ -1,4 +1,4 @@
-# /docker-compose.yml (Corrected Version)
+# /docker-compose.yml (Definitive, Corrected Version)
 
 services:
   nginx:
@@ -15,7 +15,10 @@ services:
       - web
 
   web:
-    build: ./server
+    # This is the correct structure for building the web service
+    build:
+      context: ./server
+      dockerfile: Dockerfile
     container_name: corpus_web_app
     env_file: .env
     volumes:
@@ -28,8 +31,8 @@ services:
     expose:
       - "5000"
 
-    tika:
-    # This tells Docker to build our custom image using the new file
+  tika:
+    # This is the correct structure for building the custom Tika service
     build:
       context: .
       dockerfile: tika.Dockerfile
@@ -42,7 +45,7 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
-      
+
   db:
     image: postgres:15
     container_name: corpus_db
@@ -52,12 +55,10 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      # --- CORRECTED FORMAT ---
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
-      # --- END CORRECTION ---
 
 volumes:
   corpus_data:
