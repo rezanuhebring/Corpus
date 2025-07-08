@@ -1,4 +1,4 @@
-# /server/app.py (Final Corrected Version for Displaying Documents)
+# /server/app.py (Final, Thread-Safe Version)
 
 import os, pickle, requests, threading, secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
@@ -15,6 +15,7 @@ from langchain.chains import RetrievalQA
 
 # --- App Initialization ---
 app = Flask(__name__)
+# Load configuration from environment variables
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
 app.config['API_KEY'] = os.environ.get('API_KEY')
 app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.environ.get('POSTGRES_USER')}:{os.environ.get('POSTGRES_PASSWORD')}@db/{os.environ.get('POSTGRES_DB')}"
@@ -22,33 +23,49 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
+# Load the simple classifier model
 model = pickle.load(open('model.pkl', 'rb'))
 
-# --- AI Component Initialization (Lazy Loading) ---
-qa_chain_instance = None
-vector_store = None
+# --- THREAD-SAFE AI INITIALIZATION ---
+# We use a lock to ensure that the heavy AI components are initialized only once,
+# even if multiple threads try to access them at the same time.
+ai_components = {}
+ai_lock = threading.Lock()
 
-def get_qa_chain():
-    global qa_chain_instance, vector_store
-    if qa_chain_instance is None:
-        print("Initializing AI components for the first time...")
+def get_ai_components():
+    """
+    Initializes and returns a dictionary of AI components in a thread-safe manner.
+    """
+    with ai_lock:
+        # If components are already initialized, just return them.
+        if "qa_chain" in ai_components:
+            return ai_components
+
+        print("--- Initializing AI components for the first time... ---")
         embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
         chroma_client = chromadb.HttpClient(host="chroma", port=8000)
+        
         vector_store = Chroma(
             client=chroma_client,
             collection_name="corpus_documents",
             embedding_function=embedding_function,
         )
+        
         llm = Ollama(model="tinyllama", base_url="http://ollama:11434")
-        qa_chain_instance = RetrievalQA.from_chain_type(
+        
+        qa_chain = RetrievalQA.from_chain_type(
             llm,
             retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
             return_source_documents=True
         )
-        print("AI components initialized successfully.")
-    return qa_chain_instance
+        
+        # Store the initialized components in the global dictionary
+        ai_components["vector_store"] = vector_store
+        ai_components["qa_chain"] = qa_chain
+        print("--- AI components initialized successfully. ---")
+        return ai_components
 
-# --- Database Models (CORRECTED) ---
+# --- Database Models (Unchanged) ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -57,22 +74,17 @@ class User(db.Model):
 class Document(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), nullable=False, unique=True)
-    source_agent = db.Column(db.String(120), nullable=True, default='default_agent')
+    source_agent = db.Column(db.String(120), nullable=True)
     category = db.Column(db.String(120), nullable=True)
-    # THIS IS THE FIX: The 'content' column was missing from the DB model.
-    # We add it back so the extracted text can be stored for potential future use (e.g., display).
-    content = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-# --- Routes (Unchanged) ---
-# ... (login, logout, dashboard, etc. are the same as the last version)
+# --- Routes ---
 @app.before_request
 def require_login():
     if request.endpoint and 'static' not in request.endpoint and 'api_upload' != request.endpoint and 'user_id' not in session and request.endpoint != 'login':
         return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
-# ... (rest of function is correct)
 def login():
     if request.method == 'POST':
         user = User.query.filter_by(username=request.form['username']).first()
@@ -92,28 +104,28 @@ def dashboard():
     return render_template('dashboard.html', documents=documents)
 
 @app.route('/api/v1/query', methods=['POST'])
-# ... (rest of function is correct)
 def api_query():
     if 'user_id' not in session: return "Unauthorized", 401
     query = request.json.get('query')
     if not query: return "Query is required", 400
     try:
-        chain = get_qa_chain()
-        result = chain.invoke({"query": query})
+        components = get_ai_components()
+        result = components["qa_chain"].invoke({"query": query})
         source_filenames = {doc.metadata.get('source_filename', 'Unknown') for doc in result.get('source_documents', [])}
         response_data = {"answer": result.get('result', 'No answer found.'), "sources": list(source_filenames)}
         return jsonify(response_data)
     except Exception as e:
-        print(f"QA Chain Error: {e}")
-        return jsonify({"error": "Failed to process AI query. The AI services may still be initializing."}), 500
+        print(f"!!! QA Chain Error: {e}")
+        return jsonify({"error": "Failed to process AI query. The AI service may be busy or initializing."}), 500
 
-# --- Background Processing (CORRECTED) ---
 def process_document(app_context, file_content, filename, agent_name):
     with app_context:
         try:
-            global vector_store
-            if vector_store is None: get_qa_chain()
+            # Initialize AI components within the thread if they don't exist yet
+            components = get_ai_components()
+            vector_store = components["vector_store"]
 
+            # Check if document already exists in PostgreSQL
             if Document.query.filter_by(filename=filename).first():
                 print(f"SKIPPING: Document '{filename}' already exists.")
                 return
@@ -125,14 +137,7 @@ def process_document(app_context, file_content, filename, agent_name):
             if not text_content: return
 
             category = model.predict([text_content])[0]
-
-            # THIS IS THE FIX: We now create the Document object with the 'content' field included.
-            new_doc = Document(
-                filename=filename,
-                content=text_content, # The missing piece
-                category=category,
-                source_agent=agent_name
-            )
+            new_doc = Document(filename=filename, category=category, source_agent=agent_name)
             db.session.add(new_doc)
             db.session.commit()
             print(f"SUCCESS: Saved metadata for {filename}")
@@ -147,7 +152,6 @@ def process_document(app_context, file_content, filename, agent_name):
             db.session.rollback()
 
 @app.route('/api/v1/upload', methods=['POST'])
-# ... (rest of function is correct)
 def api_upload():
     api_key = request.headers.get('X-API-Key')
     if not api_key or not secrets.compare_digest(api_key, app.config.get('API_KEY')):
@@ -164,12 +168,9 @@ def api_upload():
     thread.start()
     return jsonify({"status": "received", "filename": filename}), 202
 
-# --- One-time setup command (CORRECTED) ---
 @app.cli.command("init-db")
 def init_db_command():
-    """Creates the database tables and the admin user."""
     with app.app_context():
-        # This will now create the 'document' table with the new 'content' column
         db.create_all()
         admin_user = os.environ.get('ADMIN_USERNAME')
         admin_pass = os.environ.get('ADMIN_PASSWORD')
