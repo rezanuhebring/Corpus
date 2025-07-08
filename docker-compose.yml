@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Corrected Version)
+# /docker-compose.yml
 
 services:
   nginx:
@@ -6,19 +6,13 @@ services:
     container_name: corpus_nginx
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       - web
 
   web:
-    # This is the correct structure for building the web service
-    build:
-      context: ./server
-      dockerfile: Dockerfile
+    build: ./server
     container_name: corpus_web_app
     env_file: .env
     volumes:
@@ -28,23 +22,21 @@ services:
         condition: service_healthy
       tika:
         condition: service_healthy
+      chroma:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     expose:
       - "5000"
 
   tika:
-    # This is the correct structure for building the custom Tika service
-    build:
-      context: .
-      dockerfile: tika.Dockerfile
+    image: apache/tika:latest-full
     container_name: corpus_tika
     ports:
       - "9998:9998"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
+      interval: 15s; timeout: 10s; retries: 10; start_period: 60s
 
   db:
     image: postgres:15
@@ -56,9 +48,48 @@ services:
       - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 10s; timeout: 5s; retries: 5
+
+  chroma:
+    image: chromadb/chroma
+    container_name: corpus_chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/.chroma/index
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s; timeout: 5s; retries: 5
+
+  ollama:
+    image: ollama/ollama
+    container_name: corpus_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 30s; timeout: 10s; retries: 5
+
+  # This one-time service downloads the model and then exits.
+  ollama-model-puller:
+    image: curlimages/curl:latest
+    container_name: corpus_model_puller
+    command: >
+      /bin/sh -c "
+      echo 'Waiting for Ollama service to be ready...';
+      until curl -s -f http://ollama:11434/ > /dev/null; do
+        echo -n '.' && sleep 2;
+      done;
+      echo '\nOllama is ready. Pulling model \"llama3:8b\" (this can take 5-15 minutes)...';
+      curl http://ollama:11434/api/pull -d '{ \"name\": \"llama3:8b\" }';
+      echo 'Model pull complete. This container will now exit.';
+      "
+    depends_on:
+      - ollama
 
 volumes:
   corpus_data:
+  chroma_data:
+  ollama_data:
