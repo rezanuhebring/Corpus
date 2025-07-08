@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Hardened Version)
+# /docker-compose.yml (Definitive, Syntactically Correct Version)
 
 services:
   nginx:
@@ -21,10 +21,14 @@ services:
     volumes:
       - ./server:/app
     depends_on:
-      db: { condition: service_healthy }
-      tika: { condition: service_healthy }
-      chroma: { condition: service_healthy }
-      ollama: { condition: service_healthy }
+      db:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
 
   tika:
     image: apache/tika:latest-full
@@ -36,7 +40,7 @@ services:
       interval: 20s
       timeout: 10s
       retries: 6
-      start_period: 120s # More patient startup time
+      start_period: 120s
 
   db:
     image: postgres:15
@@ -46,7 +50,9 @@ services:
       - corpus_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s; timeout: 5s; retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   chroma:
     image: chromadb/chroma
@@ -55,14 +61,16 @@ services:
       - "8000:8000"
     volumes:
       - chroma_data:/chroma/.chroma/index
-    # --- THIS IS THE CRUCIAL FIX FOR CHROMA STABILITY ---
     environment:
       - ANONYMIZED_TELEMETRY=False
       - IS_PERSISTENT=TRUE
-    # --- END FIX ---
     healthcheck:
+      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 15s; timeout: 5s; retries: 6; start_period: 60s
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
 
   ollama:
     image: ollama/ollama
@@ -72,17 +80,26 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
+      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:11434/"]
-      interval: 30s; timeout: 10s; retries: 5; start_period: 60s
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
+  # This one-time service downloads the model and then exits.
   ollama-model-puller:
     image: curlimages/curl:latest
     container_name: corpus_model_puller
     command: >
       /bin/sh -c "
-      echo 'Waiting for Ollama...'; until curl -s -f http://ollama:11434/ > /dev/null; do sleep 2; done;
-      echo 'Pulling llama3:8b model...'; curl http://ollama:11434/api/pull -d '{ \"name\": \"llama3:8b\" }';
-      echo 'Model pull complete.';
+      echo 'Waiting for Ollama service to be ready...';
+      until curl -s -f http://ollama:11434/ > /dev/null; do
+        echo -n '.' && sleep 2;
+      done;
+      echo '\nOllama is ready. Pulling model \"llama3:8b\" (this can take 5-15 minutes)...';
+      curl http://ollama:11434/api/pull -d '{ \"name\": \"llama3:8b\" }';
+      echo 'Model pull complete. This container will now exit.';
       "
     depends_on:
       - ollama
