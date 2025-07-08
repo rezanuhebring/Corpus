@@ -12,8 +12,6 @@ langdetect==1.0.9
 # AI / RAG LIBRARIES
 langchain==0.2.5
 langchain-community==0.2.5
-chromadb==0.5.3
-# For splitting text into tokens
+chromadb==0.4.24  # <-- THIS IS THE FIX
 tiktoken==0.7.0
-# For creating the embeddings locally
 sentence-transformers==3.0.1

@@ -1,11 +1,8 @@
-# /server/app.py (Using a Lighter AI Model)
-
 import os, pickle, requests, threading, secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 
-# Import AI/RAG Libraries
 import chromadb
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
@@ -13,7 +10,6 @@ from langchain_community.llms import Ollama
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
 
-# --- App Initialization ---
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
 app.config['API_KEY'] = os.environ.get('API_KEY')
@@ -24,28 +20,29 @@ db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 model = pickle.load(open('model.pkl', 'rb'))
 
-# --- Initialize AI Components ---
-print("Initializing AI components...")
-embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-chroma_client = chromadb.HttpClient(host="chroma", port=8000)
-vector_store = Chroma(
-    client=chroma_client,
-    collection_name="corpus_documents",
-    embedding_function=embedding_function,
-)
-# --- THIS IS THE KEY CHANGE ---
-# Connect to our self-hosted Ollama container and specify the smaller model
-llm = Ollama(model="tinyllama", base_url="http://ollama:11434")
-# --- END CHANGE ---
+qa_chain_instance = None
+vector_store = None
 
-qa_chain = RetrievalQA.from_chain_type(
-    llm,
-    retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
-    return_source_documents=True
-)
-print("AI components initialized.")
+def get_qa_chain():
+    global qa_chain_instance, vector_store
+    if qa_chain_instance is None:
+        print("Initializing AI components for the first time...")
+        embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+        chroma_client = chromadb.HttpClient(host="chroma", port=8000)
+        vector_store = Chroma(
+            client=chroma_client,
+            collection_name="corpus_documents",
+            embedding_function=embedding_function,
+        )
+        llm = Ollama(model="tinyllama", base_url="http://ollama:11434")
+        qa_chain_instance = RetrievalQA.from_chain_type(
+            llm,
+            retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
+            return_source_documents=True
+        )
+        print("AI components initialized successfully.")
+    return qa_chain_instance
 
-# --- Database Models ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -58,7 +55,6 @@ class Document(db.Model):
     category = db.Column(db.String(120), nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-# --- Routes ---
 @app.before_request
 def require_login():
     if request.endpoint and 'static' not in request.endpoint and 'api_upload' != request.endpoint and 'user_id' not in session and request.endpoint != 'login':
@@ -89,19 +85,22 @@ def api_query():
     query = request.json.get('query')
     if not query: return "Query is required", 400
     try:
-        result = qa_chain.invoke({"query": query})
+        chain = get_qa_chain()
+        result = chain.invoke({"query": query})
         source_filenames = {doc.metadata.get('source_filename', 'Unknown') for doc in result.get('source_documents', [])}
         response_data = {"answer": result.get('result', 'No answer found.'), "sources": list(source_filenames)}
         return jsonify(response_data)
     except Exception as e:
         print(f"QA Chain Error: {e}")
-        return jsonify({"error": "Failed to process AI query."}), 500
+        return jsonify({"error": "Failed to process AI query. The AI services may still be initializing."}), 500
 
 def process_document(app_context, file_content, filename, agent_name):
     with app_context:
         try:
+            global vector_store
+            if vector_store is None: get_qa_chain()
             if Document.query.filter_by(filename=filename).first():
-                print(f"SKIPPING: Document '{filename}' already exists in metadata DB.")
+                print(f"SKIPPING: Document '{filename}' already exists.")
                 return
 
             tika_url = os.environ.get('TIKA_SERVER_URL', 'http://tika:9998/tika')
@@ -114,14 +113,12 @@ def process_document(app_context, file_content, filename, agent_name):
             new_doc = Document(filename=filename, category=category, source_agent=agent_name)
             db.session.add(new_doc)
             db.session.commit()
-            print(f"SUCCESS: Saved metadata for document: {filename}")
+            print(f"SUCCESS: Saved metadata for {filename}")
 
-            print(f"Now embedding document: {filename}...")
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             docs_for_vector_db = text_splitter.create_documents([text_content], metadatas=[{"source_filename": filename}])
             vector_store.add_documents(docs_for_vector_db, ids=[f"{filename}_{i}" for i, _ in enumerate(docs_for_vector_db)])
-            print(f"SUCCESS: Document {filename} fully ingested into vector store.")
-
+            print(f"SUCCESS: Ingested {filename} into vector store.")
         except Exception as e:
             print(f"!!! ERROR processing {filename}: {e}")
             db.session.rollback()
