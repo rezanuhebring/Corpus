@@ -1,4 +1,4 @@
-# /server/app.py (Corrected for Threading)
+# /server/app.py (Final Corrected Version)
 
 import os, pickle, requests, threading, secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
@@ -13,7 +13,7 @@ db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 model = pickle.load(open('model.pkl', 'rb'))
 
-# --- Database Models (Unchanged) ---
+# --- Database Models ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -27,11 +27,11 @@ class Document(db.Model):
     category = db.Column(db.String(120), nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-# --- Authentication & Main Routes (Unchanged) ---
+# --- Authentication ---
 @app.before_request
 def require_login():
     allowed_routes = ['login', 'static', 'api_upload']
-    if 'user_id' not in session and request.endpoint not in allowed_routes:
+    if request.endpoint not in allowed_routes and 'user_id' not in session:
         return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -48,75 +48,56 @@ def logout():
     session.pop('user_id', None)
     return redirect(url_for('login'))
 
+# --- Main Dashboard (CORRECTED) ---
 @app.route('/')
 def dashboard():
-    # Pass the API_KEY from the config to the template
+    # Pass the API_KEY from the environment to the template
     documents = Document.query.order_by(Document.created_at.desc()).limit(100).all()
-    api_key = os.environ.get('API_KEY', 'Not Set')
-    return render_template('dashboard.html', documents=documents, api_key=api_key)
+    # THIS IS THE FIX: We read the API_KEY from the environment and pass it to the template.
+    api_key_from_env = os.environ.get('API_KEY', 'API_KEY not set in .env file')
+    return render_template('dashboard.html', documents=documents, api_key=api_key_from_env)
 
-# --- CORRECTED API & Background Processing ---
+# --- API and Background Processing (Unchanged from last fix) ---
 def process_document(app_context, file_content, filename, agent_name):
-    """
-    This function now runs with the application context passed from the main thread.
-    This gives it access to the database and other app configurations.
-    """
     with app_context:
         try:
-            # 1. Extract content with Tika
             tika_url = os.environ.get('TIKA_SERVER_URL', 'http://tika:9998/tika')
             response = requests.put(tika_url, data=file_content, headers={"Accept": "text/plain"})
             response.raise_for_status()
             text_content = response.text.strip()
+            if not text_content: return
 
-            if not text_content:
-                print(f"Tika returned no content for {filename}")
-                return
-
-            # 2. Classify with ML Model
             category = model.predict([text_content])[0]
 
-            # 3. Save to database
-            new_doc = Document(
-                filename=filename,
-                content=text_content,
-                category=category,
-                source_agent=agent_name
-            )
+            new_doc = Document(filename=filename, content=text_content, category=category, source_agent=agent_name)
             db.session.add(new_doc)
             db.session.commit()
-            print(f"SUCCESS: Processed and saved document: {filename}, Category: {category}")
-
+            print(f"SUCCESS: Processed and saved document: {filename}")
         except Exception as e:
-            # This will print the exact Python error to the Docker logs
             print(f"!!! ERROR processing {filename}: {e}")
-            db.session.rollback() # Rollback any partial database changes
+            db.session.rollback()
 
 @app.route('/api/v1/upload', methods=['POST'])
 def api_upload():
     api_key = request.headers.get('X-API-Key')
     if not api_key or not secrets.compare_digest(api_key, os.environ.get('API_KEY')):
         return jsonify({"error": "Unauthorized"}), 401
-
+    
     file = request.files.get('document')
-    if not file:
-        return jsonify({"error": "No document file provided"}), 400
+    if not file: return jsonify({"error": "No document file provided"}), 400
 
     agent_name = request.headers.get('X-Agent-Name', 'default_agent')
     file_content = file.read()
     filename = file.filename
 
-    # This is the correct way to pass the app context to a thread
     thread = threading.Thread(target=process_document, args=(app.app_context(), file_content, filename, agent_name))
     thread.start()
-
+    
     return jsonify({"status": "received", "filename": filename}), 202
-# --- END OF CORRECTION ---
 
 # --- One-time setup command (Unchanged) ---
 @app.cli.command("init-db")
 def init_db_command():
-    """Creates the database tables and the admin user."""
     with app.app_context():
         db.create_all()
         admin_user = os.environ.get('ADMIN_USERNAME')
