@@ -1,11 +1,8 @@
-# /server/app.py (Final, Thread-Safe Version)
-
 import os, pickle, requests, threading, secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 
-# Import AI/RAG Libraries
 import chromadb
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
@@ -13,9 +10,7 @@ from langchain_community.llms import Ollama
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
 
-# --- App Initialization ---
 app = Flask(__name__)
-# Load configuration from environment variables
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
 app.config['API_KEY'] = os.environ.get('API_KEY')
 app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.environ.get('POSTGRES_USER')}:{os.environ.get('POSTGRES_PASSWORD')}@db/{os.environ.get('POSTGRES_DB')}"
@@ -23,49 +18,37 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
-# Load the simple classifier model
 model = pickle.load(open('model.pkl', 'rb'))
 
-# --- THREAD-SAFE AI INITIALIZATION ---
-# We use a lock to ensure that the heavy AI components are initialized only once,
-# even if multiple threads try to access them at the same time.
-ai_components = {}
-ai_lock = threading.Lock()
+class AIEngine:
+    _instance = None
+    _lock = threading.Lock()
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(AIEngine, cls).__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    def _initialize(self):
+        if not self._initialized:
+            print("--- Initializing AI Engine for the first time... ---")
+            self.embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+            self.chroma_client = chromadb.HttpClient(host="chroma", port=8000)
+            self.vector_store = Chroma(client=self.chroma_client, collection_name="corpus_documents", embedding_function=self.embedding_function)
+            self.llm = Ollama(model="tinyllama", base_url="http://ollama:11434")
+            self.qa_chain = RetrievalQA.from_chain_type(self.llm, retriever=self.vector_store.as_retriever(search_kwargs={"k": 5}), return_source_documents=True)
+            self._initialized = True
+            print("--- AI Engine Initialized Successfully. ---")
+    def get_qa_chain(self):
+        if not self._initialized: self._initialize()
+        return self.qa_chain
+    def get_vector_store(self):
+        if not self._initialized: self._initialize()
+        return self.vector_store
 
-def get_ai_components():
-    """
-    Initializes and returns a dictionary of AI components in a thread-safe manner.
-    """
-    with ai_lock:
-        # If components are already initialized, just return them.
-        if "qa_chain" in ai_components:
-            return ai_components
+ai_engine = AIEngine()
 
-        print("--- Initializing AI components for the first time... ---")
-        embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-        chroma_client = chromadb.HttpClient(host="chroma", port=8000)
-        
-        vector_store = Chroma(
-            client=chroma_client,
-            collection_name="corpus_documents",
-            embedding_function=embedding_function,
-        )
-        
-        llm = Ollama(model="tinyllama", base_url="http://ollama:11434")
-        
-        qa_chain = RetrievalQA.from_chain_type(
-            llm,
-            retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
-            return_source_documents=True
-        )
-        
-        # Store the initialized components in the global dictionary
-        ai_components["vector_store"] = vector_store
-        ai_components["qa_chain"] = qa_chain
-        print("--- AI components initialized successfully. ---")
-        return ai_components
-
-# --- Database Models (Unchanged) ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -78,7 +61,6 @@ class Document(db.Model):
     category = db.Column(db.String(120), nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-# --- Routes ---
 @app.before_request
 def require_login():
     if request.endpoint and 'static' not in request.endpoint and 'api_upload' != request.endpoint and 'user_id' not in session and request.endpoint != 'login':
@@ -109,44 +91,36 @@ def api_query():
     query = request.json.get('query')
     if not query: return "Query is required", 400
     try:
-        components = get_ai_components()
-        result = components["qa_chain"].invoke({"query": query})
+        chain = ai_engine.get_qa_chain()
+        result = chain.invoke({"query": query})
         source_filenames = {doc.metadata.get('source_filename', 'Unknown') for doc in result.get('source_documents', [])}
         response_data = {"answer": result.get('result', 'No answer found.'), "sources": list(source_filenames)}
         return jsonify(response_data)
     except Exception as e:
         print(f"!!! QA Chain Error: {e}")
-        return jsonify({"error": "Failed to process AI query. The AI service may be busy or initializing."}), 500
+        return jsonify({"error": "Failed to process AI query. The AI services may be busy or initializing."}), 500
 
 def process_document(app_context, file_content, filename, agent_name):
     with app_context:
         try:
-            # Initialize AI components within the thread if they don't exist yet
-            components = get_ai_components()
-            vector_store = components["vector_store"]
-
-            # Check if document already exists in PostgreSQL
+            vector_store = ai_engine.get_vector_store()
             if Document.query.filter_by(filename=filename).first():
                 print(f"SKIPPING: Document '{filename}' already exists.")
                 return
-
             tika_url = os.environ.get('TIKA_SERVER_URL', 'http://tika:9998/tika')
             response = requests.put(tika_url, data=file_content, headers={"Accept": "text/plain", "Content-Type": "application/octet-stream"})
             response.raise_for_status()
             text_content = response.text.strip()
             if not text_content: return
-
             category = model.predict([text_content])[0]
             new_doc = Document(filename=filename, category=category, source_agent=agent_name)
             db.session.add(new_doc)
             db.session.commit()
             print(f"SUCCESS: Saved metadata for {filename}")
-
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             docs_for_vector_db = text_splitter.create_documents([text_content], metadatas=[{"source_filename": filename}])
             vector_store.add_documents(docs_for_vector_db, ids=[f"{filename}_{i}" for i, _ in enumerate(docs_for_vector_db)])
             print(f"SUCCESS: Ingested {filename} into vector store.")
-
         except Exception as e:
             print(f"!!! ERROR processing {filename}: {e}")
             db.session.rollback()
@@ -156,14 +130,11 @@ def api_upload():
     api_key = request.headers.get('X-API-Key')
     if not api_key or not secrets.compare_digest(api_key, app.config.get('API_KEY')):
         return jsonify({"error": "Unauthorized"}), 401
-    
     file = request.files.get('document')
     if not file: return jsonify({"error": "No document file provided"}), 400
-
     agent_name = request.headers.get('X-Agent-Name', 'default_agent')
     file_content = file.read()
     filename = file.filename
-    
     thread = threading.Thread(target=process_document, args=(app.app_context(), file_content, filename, agent_name))
     thread.start()
     return jsonify({"status": "received", "filename": filename}), 202
