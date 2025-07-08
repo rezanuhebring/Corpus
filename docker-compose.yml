@@ -28,20 +28,21 @@ services:
     expose:
       - "5000"
 
-  tika:
-    image: apache/tika:latest-full
+    tika:
+    # This tells Docker to build our custom image using the new file
+    build:
+      context: .
+      dockerfile: tika.Dockerfile
     container_name: corpus_tika
     ports:
       - "9998:9998"
     healthcheck:
-      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 60s
-      # --- END CORRECTION ---
-
+      
   db:
     image: postgres:15
     container_name: corpus_db
