@@ -51,7 +51,6 @@ if ! command -v docker >/dev/null; then
     sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 
-# Install Certbot for production environment
 if [ "$ENV" == "production" ]; then
     echo "Installing Certbot for Let's Encrypt..."
     sudo apt-get install -y certbot
@@ -85,12 +84,10 @@ server {
 EOF
     echo "Development nginx.conf created."
 else # Production
-    # This initial config is just for the certbot challenge
     cat << EOF > nginx.conf
 server {
     listen 80;
     server_name $DOMAIN_NAME;
-    # Allow certbot to access the .well-known directory for challenges
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
@@ -99,14 +96,12 @@ server {
     }
 }
 EOF
-    echo "Initial production nginx.conf created for SSL challenge."
+    echo "Initial production nginx.conf created."
 fi
 
 # --- Step 5: Generate Environment Configuration ---
-# (This step is mostly unchanged)
 echo -e "\n${YELLOW}Step 5: Generating environment configuration...${NC}"
 if [ ! -f ".env" ]; then
-    # ... (code to generate .env file as before)
     ADMIN_PASSWORD_PLAIN=""
     while [[ -z "$ADMIN_PASSWORD_PLAIN" ]]; do read -p "Please enter a password for the 'admin' user: " -s ADMIN_PASSWORD_PLAIN; echo; done
     echo "FLASK_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(16))')" > .env
@@ -118,28 +113,30 @@ fi
 echo ".env file is ready."
 
 # --- Step 6: Prepare Dummy ML Model ---
-# (This step is unchanged)
 echo -e "\n${YELLOW}Step 6: Creating dummy ML model...${NC}"
+rm -rf venv
 python3 -m venv venv; source venv/bin/activate; pip3 install scikit-learn==1.5.0 > /dev/null
-python3 -c "import pickle; from sklearn.feature_extraction.text import TfidfVectorizer; from sklearn.linear_model import LogisticRegression; from sklearn.pipeline import Pipeline; model = Pipeline([('vectorizer', TfidfVectorizer()), ('classifier', LogisticRegression())]); model.fit(['sample text'], ['default']); pickle.dump(model, open('server/model.pkl', 'wb'))"
+
+# --- THIS IS THE CORRECTED COMMAND ---
+# We now provide two different samples with two different classes.
+python3 -c "import pickle; from sklearn.feature_extraction.text import TfidfVectorizer; from sklearn.linear_model import LogisticRegression; from sklearn.pipeline import Pipeline; model = Pipeline([('vectorizer', TfidfVectorizer()), ('classifier', LogisticRegression())]); DUMMY_TEXTS = ['This is a contract agreement.', 'This is a financial invoice.']; DUMMY_LABELS = ['Contract', 'Finance']; model.fit(DUMMY_TEXTS, DUMMY_LABELS); pickle.dump(model, open('server/model.pkl', 'wb'))"
+# --- END OF CORRECTION ---
+
 deactivate; rm -rf venv
-echo "Model created."
+echo "Model created successfully."
 
 # --- Step 7: Launch Services & Obtain SSL (if needed) ---
+# ... (rest of the script is unchanged)
 echo -e "\n${YELLOW}Step 7: Launching services...${NC}"
 if [ "$ENV" == "production" ]; then
     echo "Starting Nginx temporarily to obtain SSL certificate..."
-    # Create dummy certbot directory
     sudo mkdir -p ./certbot/www
-    sudo chmod -R 777 ./certbot # Make it writable by certbot container
-    # Start only nginx
+    sudo chmod -R 777 ./certbot
     docker compose up -d nginx
     echo "Requesting SSL certificate from Let's Encrypt for $DOMAIN_NAME..."
     sudo certbot certonly --webroot -w ./certbot/www -d $DOMAIN_NAME --email $LETSENCRYPT_EMAIL --rsa-key-size 4096 --agree-tos --non-interactive
     echo "SSL Certificate obtained. Stopping temporary Nginx."
     docker compose down
-
-    # Now, create the final production nginx.conf
     echo "Creating final production Nginx configuration..."
     cat << EOF > nginx.conf
 server {
@@ -159,7 +156,6 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
     location / {
         proxy_pass http://web:5000;
         proxy_set_header Host \$host;
@@ -180,7 +176,6 @@ SERVER_URL="http://localhost"
 if [ "$ENV" == "production" ]; then
     SERVER_URL="https://$DOMAIN_NAME"
 fi
-
 echo "Corpus is running. It may take a minute for all services to initialize."
 echo -e "Access the dashboard at: ${YELLOW}$SERVER_URL${NC}"
 echo -e "Login with username: ${GREEN}admin${NC} and the password you set."
