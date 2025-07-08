@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Syntactically Correct Version)
+# /docker-compose.yml (Using a Lighter AI Model)
 
 services:
   nginx:
@@ -65,7 +65,6 @@ services:
       - ANONYMIZED_TELEMETRY=False
       - IS_PERSISTENT=TRUE
     healthcheck:
-      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 15s
       timeout: 5s
@@ -80,14 +79,13 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
-      # --- CORRECTED FORMAT ---
       test: ["CMD", "curl", "-f", "http://localhost:11434/"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
 
-  # This one-time service downloads the model and then exits.
+  # This service now pulls a much smaller model to save RAM
   ollama-model-puller:
     image: curlimages/curl:latest
     container_name: corpus_model_puller
@@ -97,8 +95,8 @@ services:
       until curl -s -f http://ollama:11434/ > /dev/null; do
         echo -n '.' && sleep 2;
       done;
-      echo '\nOllama is ready. Pulling model \"llama3:8b\" (this can take 5-15 minutes)...';
-      curl http://ollama:11434/api/pull -d '{ \"name\": \"llama3:8b\" }';
+      echo '\nOllama is ready. Pulling model \"tinyllama\"...';
+      curl http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
       echo 'Model pull complete. This container will now exit.';
       "
     depends_on:

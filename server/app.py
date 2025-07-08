@@ -1,4 +1,4 @@
-# /server/app.py
+# /server/app.py (Using a Lighter AI Model)
 
 import os, pickle, requests, threading, secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
@@ -33,8 +33,11 @@ vector_store = Chroma(
     collection_name="corpus_documents",
     embedding_function=embedding_function,
 )
-# Connect to our self-hosted Ollama container
-llm = Ollama(model="llama3:8b", base_url="http://ollama:11434")
+# --- THIS IS THE KEY CHANGE ---
+# Connect to our self-hosted Ollama container and specify the smaller model
+llm = Ollama(model="tinyllama", base_url="http://ollama:11434")
+# --- END CHANGE ---
+
 qa_chain = RetrievalQA.from_chain_type(
     llm,
     retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
