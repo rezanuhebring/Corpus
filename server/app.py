@@ -1,8 +1,11 @@
+# /server/app.py (Final Corrected Version for Displaying Documents)
+
 import os, pickle, requests, threading, secrets
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 
+# Import AI/RAG Libraries
 import chromadb
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
@@ -10,6 +13,7 @@ from langchain_community.llms import Ollama
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
 
+# --- App Initialization ---
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
 app.config['API_KEY'] = os.environ.get('API_KEY')
@@ -20,6 +24,7 @@ db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 model = pickle.load(open('model.pkl', 'rb'))
 
+# --- AI Component Initialization (Lazy Loading) ---
 qa_chain_instance = None
 vector_store = None
 
@@ -43,6 +48,7 @@ def get_qa_chain():
         print("AI components initialized successfully.")
     return qa_chain_instance
 
+# --- Database Models (CORRECTED) ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -53,14 +59,20 @@ class Document(db.Model):
     filename = db.Column(db.String(255), nullable=False, unique=True)
     source_agent = db.Column(db.String(120), nullable=True, default='default_agent')
     category = db.Column(db.String(120), nullable=True)
+    # THIS IS THE FIX: The 'content' column was missing from the DB model.
+    # We add it back so the extracted text can be stored for potential future use (e.g., display).
+    content = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
+# --- Routes (Unchanged) ---
+# ... (login, logout, dashboard, etc. are the same as the last version)
 @app.before_request
 def require_login():
     if request.endpoint and 'static' not in request.endpoint and 'api_upload' != request.endpoint and 'user_id' not in session and request.endpoint != 'login':
         return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
+# ... (rest of function is correct)
 def login():
     if request.method == 'POST':
         user = User.query.filter_by(username=request.form['username']).first()
@@ -80,6 +92,7 @@ def dashboard():
     return render_template('dashboard.html', documents=documents)
 
 @app.route('/api/v1/query', methods=['POST'])
+# ... (rest of function is correct)
 def api_query():
     if 'user_id' not in session: return "Unauthorized", 401
     query = request.json.get('query')
@@ -94,11 +107,13 @@ def api_query():
         print(f"QA Chain Error: {e}")
         return jsonify({"error": "Failed to process AI query. The AI services may still be initializing."}), 500
 
+# --- Background Processing (CORRECTED) ---
 def process_document(app_context, file_content, filename, agent_name):
     with app_context:
         try:
             global vector_store
             if vector_store is None: get_qa_chain()
+
             if Document.query.filter_by(filename=filename).first():
                 print(f"SKIPPING: Document '{filename}' already exists.")
                 return
@@ -110,7 +125,14 @@ def process_document(app_context, file_content, filename, agent_name):
             if not text_content: return
 
             category = model.predict([text_content])[0]
-            new_doc = Document(filename=filename, category=category, source_agent=agent_name)
+
+            # THIS IS THE FIX: We now create the Document object with the 'content' field included.
+            new_doc = Document(
+                filename=filename,
+                content=text_content, # The missing piece
+                category=category,
+                source_agent=agent_name
+            )
             db.session.add(new_doc)
             db.session.commit()
             print(f"SUCCESS: Saved metadata for {filename}")
@@ -119,11 +141,13 @@ def process_document(app_context, file_content, filename, agent_name):
             docs_for_vector_db = text_splitter.create_documents([text_content], metadatas=[{"source_filename": filename}])
             vector_store.add_documents(docs_for_vector_db, ids=[f"{filename}_{i}" for i, _ in enumerate(docs_for_vector_db)])
             print(f"SUCCESS: Ingested {filename} into vector store.")
+
         except Exception as e:
             print(f"!!! ERROR processing {filename}: {e}")
             db.session.rollback()
 
 @app.route('/api/v1/upload', methods=['POST'])
+# ... (rest of function is correct)
 def api_upload():
     api_key = request.headers.get('X-API-Key')
     if not api_key or not secrets.compare_digest(api_key, app.config.get('API_KEY')):
@@ -140,9 +164,12 @@ def api_upload():
     thread.start()
     return jsonify({"status": "received", "filename": filename}), 202
 
+# --- One-time setup command (CORRECTED) ---
 @app.cli.command("init-db")
 def init_db_command():
+    """Creates the database tables and the admin user."""
     with app.app_context():
+        # This will now create the 'document' table with the new 'content' column
         db.create_all()
         admin_user = os.environ.get('ADMIN_USERNAME')
         admin_pass = os.environ.get('ADMIN_PASSWORD')
