@@ -1,0 +1,4 @@
+# /agent/requirements.txt
+
+# Used for making HTTP requests to the central server API
+requests==2.32.3

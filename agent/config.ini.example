@@ -1,0 +1,19 @@
+# /agent/config.ini.example
+
+[server]
+# The full URL of your Corpus server's API endpoint
+# Example: http://192.168.1.100/api/v1/upload
+# Example: https://corpus.yourcompany.com/api/v1/upload
+server_url = http://<YOUR_SERVER_IP_OR_DOMAIN>/api/v1/upload
+
+# The secret API key provided by the Corpus server administrator
+api_key = <YOUR_SECRET_API_KEY>
+
+[agent]
+# The full path to the directory this agent should scan for documents.
+# Windows Example: C:\Users\John\Documents\ExternalDrive
+# Linux/macOS Example: /home/john/external_drive
+scan_directory = <FULL_PATH_TO_YOUR_DOCUMENT_FOLDER>
+
+# How often to check the directory for new files, in seconds.
+scan_interval_seconds = 60
