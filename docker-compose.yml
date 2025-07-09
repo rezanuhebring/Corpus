@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive Custom Image Version)
+# /docker-compose.yml (Definitive, Syntactically Correct Final Version)
 
 services:
   nginx:
@@ -17,8 +17,10 @@ services:
       - ./server:/app
       - corpus_uploads:/app/uploads
     depends_on:
-      db: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: >
       sh -c "flask init-db && 
              gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
@@ -30,7 +32,6 @@ services:
     volumes:
       - ./server:/app
       - corpus_uploads:/app/uploads
-    # The worker waits for the containers to be created, not healthy
     depends_on:
       - redis
       - db
@@ -48,10 +49,11 @@ services:
     container_name: corpus_redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s; timeout: 5s; retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   tika:
-    # BUILD our custom tika image
     build:
       context: .
       dockerfile: tika.Dockerfile
@@ -66,23 +68,24 @@ services:
     volumes:
       - corpus_data:/var/lib/postgresql/data
     healthcheck:
+      # --- THIS IS THE CORRECTED FORMAT ---
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s; timeout: 5s; retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   chroma:
-    # We will keep the official Chroma image as it is the most stable of the three
     image: chromadb/chroma
     container_name: corpus_chroma
     ports:
-        - "8000:8000"
+      - "8000:8000"
     volumes:
-        - chroma_data:/chroma/.chroma/index
+      - chroma_data:/chroma/.chroma/index
     environment:
-        - ANONYMIZED_TELEMETRY=False
-        - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=False
+      - IS_PERSISTENT=TRUE
 
   ollama:
-    # BUILD our custom ollama image with the model pre-loaded
     build:
       context: .
       dockerfile: ollama.Dockerfile
