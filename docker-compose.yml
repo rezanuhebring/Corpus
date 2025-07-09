@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive CPU-Only Version)
+# /docker-compose.yml (Definitive, Corrected Version for Job Queue)
 
 services:
   nginx:
@@ -17,7 +17,7 @@ services:
     env_file: .env
     volumes:
       - ./server:/app
-      - corpus_uploads:/app/uploads
+      - corpus_uploads:/app/uploads # Shared volume for documents
     depends_on:
       - db
       - redis
@@ -31,7 +31,7 @@ services:
     env_file: .env
     volumes:
       - ./server:/app
-      - corpus_uploads:/app/uploads
+      - corpus_uploads:/app/uploads # Shared volume for documents
     depends_on:
       - redis
       - db
@@ -45,7 +45,9 @@ services:
     container_name: corpus_redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s; timeout: 5s; retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   tika:
     image: apache/tika:latest-full
@@ -59,7 +61,9 @@ services:
       - corpus_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s; timeout: 5s; retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   chroma:
     image: chromadb/chroma
@@ -77,9 +81,6 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # NOTE: No special 'deploy' or 'runtime' keys are needed.
-    # Ollama automatically uses the CPU if no compatible GPU is found.
-    # The key is allocating enough RAM to the VM itself.
 
   ollama-model-puller:
     image: curlimages/curl:latest
@@ -88,7 +89,7 @@ services:
       /bin/sh -c "
       echo 'Waiting for Ollama...';
       until curl -s -f http://ollama:11434/ > /dev/null; do sleep 2; done;
-      echo 'Pulling tinyllama model for CPU-only operation...';
+      echo 'Pulling tinyllama model...';
       curl http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
       echo 'Model pull complete.';
       "
