@@ -1,11 +1,11 @@
+# /docker-compose.yml (Definitive Custom Image Version)
+
 services:
   nginx:
     image: nginx:latest
     container_name: corpus_nginx
     ports:
       - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - web
 
@@ -17,10 +17,8 @@ services:
       - ./server:/app
       - corpus_uploads:/app/uploads
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
     command: >
       sh -c "flask init-db && 
              gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
@@ -32,37 +30,34 @@ services:
     volumes:
       - ./server:/app
       - corpus_uploads:/app/uploads
+    # The worker waits for the containers to be created, not healthy
     depends_on:
-      redis:
-        condition: service_healthy
-      db:
-        condition: service_healthy
-      tika:
-        condition: service_healthy
-      chroma:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-    command: celery -A celery_worker.celery worker --loglevel=info
+      - redis
+      - db
+      - tika
+      - chroma
+      - ollama
+    command: >
+      sh -c "echo 'Worker waiting for services...' &&
+             sleep 20 &&
+             echo 'Worker starting...' &&
+             celery -A celery_worker.celery worker --loglevel=info"
 
   redis:
     image: redis:7-alpine
     container_name: corpus_redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 10s; timeout: 5s; retries: 5
 
   tika:
-    image: apache/tika:latest-full
+    # BUILD our custom tika image
+    build:
+      context: .
+      dockerfile: tika.Dockerfile
     container_name: corpus_tika
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
+    ports:
+      - "9998:9998"
 
   db:
     image: postgres:15
@@ -72,50 +67,30 @@ services:
       - corpus_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 10s; timeout: 5s; retries: 5
 
   chroma:
+    # We will keep the official Chroma image as it is the most stable of the three
     image: chromadb/chroma
     container_name: corpus_chroma
+    ports:
+        - "8000:8000"
     volumes:
-      - chroma_data:/chroma/.chroma/index
+        - chroma_data:/chroma/.chroma/index
     environment:
-      - ANONYMIZED_TELEMETRY=False
-      - IS_PERSISTENT=TRUE
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+        - ANONYMIZED_TELEMETRY=False
+        - IS_PERSISTENT=TRUE
 
   ollama:
-    image: ollama/ollama
+    # BUILD our custom ollama image with the model pre-loaded
+    build:
+      context: .
+      dockerfile: ollama.Dockerfile
     container_name: corpus_ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  ollama-model-puller:
-    image: curlimages/curl:latest
-    container_name: corpus_model_puller
-    command: >
-      /bin/sh -c "
-      echo 'Waiting for Ollama...';
-      until curl -s -f http://ollama:11434/ > /dev/null; do sleep 2; done;
-      echo 'Pulling tinyllama model...';
-      curl http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
-      echo 'Model pull complete.';
-      "
-    depends_on:
-      - ollama
 
 volumes:
   corpus_data:
