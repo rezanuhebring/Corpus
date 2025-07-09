@@ -64,21 +64,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # In your docker-compose.yml file:
+
   chroma:
     image: chromadb/chroma:0.4.24
     container_name: corpus_chroma
-    # FIX: The correct, expected path for persistence in this image version is /chroma/chroma
-    volumes: ["chroma_data:/chroma/chroma"]
-    # FIX: Reverting to the reliable IS_PERSISTENT flag, which works with the correct volume path.
-    environment:
-      - ANONYMIZED_TELEMETRY=False
-      - IS_PERSISTENT=TRUE
+    # The volume mount is correct, we are mounting to /chroma
+    volumes: ["chroma_data:/chroma"]
+    # THIS IS THE DEFINITIVE FIX:
+    # We override the command to first fix permissions, then run the server.
+    command: >
+      sh -c "
+      chown -R chroma:chroma /chroma &&
+      chroma run --host 0.0.0.0 --port 8000 --path /chroma
+      "
+    # No environment variables like IS_PERSISTENT are needed. The command handles everything.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s # Giving it more time to initialize persistence
+      # Give it a generous start period to allow for the chown and server init.
+      start_period: 30s
 
   ollama:
     # FIX: The container's only job is to run the server. No complex command.
