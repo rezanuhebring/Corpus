@@ -1,3 +1,5 @@
+# /server/requirements.txt
+
 Flask==3.0.3
 gunicorn==22.0.0
 Flask-SQLAlchemy==3.1.1
@@ -11,7 +13,7 @@ langdetect==1.0.9
 # AI / RAG LIBRARIES
 langchain==0.2.5
 langchain-community==0.2.5
-chromadb==0.4.24  # <-- THE CRITICAL FIX
+chromadb==0.4.24  # <-- THE DEFINITIVE FIX
 tiktoken==0.7.0
 sentence-transformers==3.0.1
 
