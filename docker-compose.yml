@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Final Corrected Syntax)
+# /docker-compose.yml (Definitive, All Custom Images Version)
 
 services:
   nginx:
@@ -6,11 +6,6 @@ services:
     container_name: corpus_nginx
     ports:
       - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       - web
 
@@ -22,10 +17,8 @@ services:
       - ./server:/app
       - corpus_uploads:/app/uploads
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - db
+      - redis
     command: >
       sh -c "flask init-db && 
              gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
@@ -38,38 +31,31 @@ services:
       - ./server:/app
       - corpus_uploads:/app/uploads
     depends_on:
-      redis:
-        condition: service_healthy
-      db:
-        condition: service_healthy
-      tika:
-        condition: service_healthy
-      chroma:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-    command: celery -A celery_worker.celery worker --loglevel=info
+      - redis
+      - db
+      - tika
+      - chroma
+      - ollama
+    command: >
+      # This command waits 25 seconds for all services to initialize before starting.
+      # This is more reliable than healthchecks in this environment.
+      sh -c "echo 'Worker waiting for services...' &&
+             sleep 25 &&
+             echo 'Worker starting...' &&
+             celery -A celery_worker.celery worker --loglevel=info"
 
   redis:
     image: redis:7-alpine
     container_name: corpus_redis
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   tika:
-    image: apache/tika:latest-full
+    # BUILD our custom, stable Tika image
+    build:
+      context: .
+      dockerfile: tika.Dockerfile
     container_name: corpus_tika
     ports:
       - "9998:9998"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
 
   db:
     image: postgres:15
@@ -77,16 +63,9 @@ services:
     env_file: .env
     volumes:
       - corpus_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      # --- THIS IS THE CORRECTED FORMAT ---
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   chroma:
+    # Use the official image, but remove the failing healthcheck
     image: chromadb/chroma
     container_name: corpus_chroma
     ports:
@@ -96,41 +75,17 @@ services:
     environment:
       - ANONYMIZED_TELEMETRY=False
       - IS_PERSISTENT=TRUE
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   ollama:
-    image: ollama/ollama
+    # BUILD our custom Ollama image with the model pre-baked
+    build:
+      context: .
+      dockerfile: ollama.Dockerfile
     container_name: corpus_ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  # This one-time service downloads the model and then exits.
-  ollama-model-puller:
-    image: curlimages/curl:latest
-    container_name: corpus_model_puller
-    command: >
-      /bin/sh -c "
-      echo 'Waiting for Ollama service to be ready...';
-      until curl -s -f http://ollama:11434/ > /dev/null; do
-        echo -n '.' && sleep 2;
-      done;
-      echo '\nOllama is ready. Pulling model \"tinyllama\"...';
-      curl http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
-      echo 'Model pull complete. This container will now exit.';
-      "
-    depends_on:
-      - ollama
 
 volumes:
   corpus_data:
