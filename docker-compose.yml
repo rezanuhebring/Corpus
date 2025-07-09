@@ -84,17 +84,14 @@ services:
   ollama:
     build:
       context: .
-      dockerfile: ollama.Dockerfile # <<< OPTIMIZATION: Build image with model pre-loaded
+      dockerfile: ollama.Dockerfile
     container_name: corpus_ollama
     volumes: ["ollama_data:/root/.ollama"]
     tty: true
-    deploy:
-      resources:
-        reservations:
-          devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu]
+    # The 'deploy' section for GPU has been removed.
+    # This environment variable is added to ensure compatibility with CPUs that lack AVX.
+    environment:
+      - OLLAMA_LLM_LIBRARY=/usr/local/lib/ollama/llm/cpu_avx_off
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/"]
       interval: 30s
