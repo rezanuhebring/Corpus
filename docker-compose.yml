@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Syntactically Correct Final Version)
+# /docker-compose.yml
 
 services:
   nginx:
@@ -35,16 +35,17 @@ services:
       - ./server:/app
       - corpus_uploads:/app/uploads
     depends_on:
-      - redis
-      - db
-      - tika
-      - chroma
-      - ollama
-    command: >
-      sh -c "echo 'Worker waiting 30s for services...' &&
-             sleep 30 &&
-             echo 'Worker starting...' &&
-             celery -A celery_worker.celery worker --loglevel=info"
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      tika:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    command: celery -A celery_worker.celery worker --loglevel=info
 
   redis:
     image: redis:7-alpine
@@ -58,8 +59,12 @@ services:
   tika:
     image: apache/tika:latest-full
     container_name: corpus_tika
-    ports:
-      - "9998:9998"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   db:
     image: postgres:15
@@ -68,7 +73,7 @@ services:
     volumes:
       - corpus_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \$\$POSTGRES_USER -d \$\$POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -76,13 +81,16 @@ services:
   chroma:
     image: chromadb/chroma
     container_name: corpus_chroma
-    ports:
-      - "8000:8000"
     volumes:
       - chroma_data:/chroma/.chroma/index
     environment:
       - ANONYMIZED_TELEMETRY=False
       - IS_PERSISTENT=TRUE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   ollama:
     image: ollama/ollama
@@ -91,6 +99,11 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   ollama-model-puller:
     image: curlimages/curl:latest
@@ -101,7 +114,7 @@ services:
       until curl -s -f http://ollama:11434/ > /dev/null; do
         echo -n '.' && sleep 2;
       done;
-      echo 'Ollama is ready. Pulling model \"tinyllama\"...';
+      echo '\nOllama is ready. Pulling model \"tinyllama\"...';
       curl http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
       echo 'Model pull complete. This container will now exit.';
       "
