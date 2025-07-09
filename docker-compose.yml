@@ -66,14 +66,19 @@ services:
 
   # In your docker-compose.yml file:
   chroma:
-    # We now BUILD our custom image instead of using the public one directly.
-    build:
-      context: .
-      dockerfile: chroma.Dockerfile
+    # We go back to the original image. No custom build needed.
+    image: chromadb/chroma:0.4.24
     container_name: corpus_chroma
     volumes: ["chroma_data:/chroma"]
-    # This 'command' is now passed to our entrypoint script as arguments ("$@")
-    command: ["chroma", "run", "--host", "0.0.0.0", "--port", "8000", "--path", "/chroma"]
+    # THIS IS THE FINAL FIX:
+    # We run a shell command that does two things:
+    # 1. Fixes permissions on the volume.
+    # 2. Starts the server using its FULL, ABSOLUTE PATH, which cannot fail with "command not found".
+    command: >
+      sh -c "
+      chown -R chroma:chroma /chroma && 
+      /bin/chroma run --host 0.0.0.0 --port 8000 --path /chroma
+      "
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 10s
