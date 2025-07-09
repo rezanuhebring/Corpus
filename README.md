@@ -65,3 +65,19 @@ For Windows deployment, you can use `pyinstaller` to bundle the agent into a sin
 pip install -r requirements.txt
 pip install pyinstaller
 pyinstaller --onefile --add-data "config.ini;." agent.py
+
+/corpus/
+├── docker-compose.yml
+├── setup.sh
+├── server/
+│ ├── Dockerfile
+│ ├── requirements.txt
+│ ├── app.py
+│ └── templates/
+│ ├── login.html
+│ └── dashboard.html
+└── agent/
+├── agent.py
+├── requirements.txt
+└── config.ini.example
+
