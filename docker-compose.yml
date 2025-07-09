@@ -67,17 +67,6 @@ services:
   chroma:
     image: chromadb/chroma:0.4.24
     container_name: corpus_chroma
-    volumes: ["chroma_data:/chroma/.chroma/index"]
-    environment: ["ANONYMIZED_TELEMETRY=False", "IS_PERSISTENT=TRUE"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  chroma:
-    image: chromadb/chroma:0.4.24
-    container_name: corpus_chroma
     # FIX 1: The volume now points to the parent directory for simplicity.
     volumes: ["chroma_data:/chroma"]
     # FIX 2: Replaced IS_PERSISTENT with an explicit command to run the server.
@@ -91,6 +80,27 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  ollama:
+    build:
+      context: .
+      dockerfile: ollama.Dockerfile # <<< OPTIMIZATION: Build image with model pre-loaded
+    container_name: corpus_ollama
+    volumes: ["ollama_data:/root/.ollama"]
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
 volumes:
   corpus_data: {}
