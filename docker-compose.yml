@@ -66,18 +66,18 @@ services:
 
   # In your docker-compose.yml file:
   chroma:
-    # We go back to the original image. No custom build needed.
     image: chromadb/chroma:0.4.24
     container_name: corpus_chroma
     volumes: ["chroma_data:/chroma"]
-    # THIS IS THE FINAL FIX:
-    # We run a shell command that does two things:
-    # 1. Fixes permissions on the volume.
-    # 2. Starts the server using its FULL, ABSOLUTE PATH, which cannot fail with "command not found".
+    # THIS IS THE FINAL, CORRECT COMMAND.
+    # It executes a shell that:
+    # 1. As root, fixes the permissions of the /chroma directory.
+    # 2. As root, uses 'su' (Switch User) to execute the final command *as the 'chroma' user*.
+    #    'exec' replaces the shell process, which is a Docker best practice.
     command: >
       sh -c "
-      chown -R chroma:chroma /chroma && 
-      /bin/chroma run --host 0.0.0.0 --port 8000 --path /chroma
+      chown -R chroma:chroma /chroma &&
+      exec su -s /bin/sh -c '/bin/chroma run --host 0.0.0.0 --port 8000 --path /chroma' chroma
       "
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
