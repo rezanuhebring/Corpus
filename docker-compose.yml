@@ -67,35 +67,25 @@ services:
   chroma:
     image: chromadb/chroma:0.4.24
     container_name: corpus_chroma
-    # FIX 1: The volume now points to the parent directory for simplicity.
-    volumes: ["chroma_data:/chroma"]
-    # FIX 2: Replaced IS_PERSISTENT with an explicit command to run the server.
-    # This is the modern, reliable way to ensure persistence.
-    command: ["--host", "0.0.0.0", "--port", "8000", "--path", "/chroma"]
+    # FIX: The correct, expected path for persistence in this image version is /chroma/chroma
+    volumes: ["chroma_data:/chroma/chroma"]
+    # FIX: Reverting to the reliable IS_PERSISTENT flag, which works with the correct volume path.
     environment:
-      - ANONYMIZED_TELEMETRY=False 
-      # IS_PERSISTENT is no longer needed
+      - ANONYMIZED_TELEMETRY=False
+      - IS_PERSISTENT=TRUE
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s # Giving it more time to initialize persistence
 
   ollama:
-    # FIX 1: Revert to the standard, official image. No 'build' section needed.
+    # FIX: The container's only job is to run the server. No complex command.
     image: ollama/ollama
     container_name: corpus_ollama
     volumes: ["ollama_data:/root/.ollama"]
     tty: true
-    # FIX 2: Use a robust startup command.
-    # This command runs inside the container on startup. It checks if 'tinyllama'
-    # is already downloaded. If not, it pulls it. Then, it starts the server.
-    # This is far more reliable than building the model into the image.
-    command: >
-      sh -c "
-      (ollama list | grep -q tinyllama || ollama pull tinyllama) &&
-      ollama serve
-      "
     environment:
       # This is still useful for CPU compatibility.
       - OLLAMA_LLM_LIBRARY=/usr/local/lib/ollama/llm/cpu_avx_off
@@ -104,8 +94,25 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      # Give the container more time to start, as it might be downloading the model.
-      start_period: 300s
+      start_period: 60s
+
+  # FIX: Re-introducing the model puller. This is the robust, decoupled way.
+  ollama-model-puller:
+    image: curlimages/curl:latest
+    container_name: corpus_model_puller
+    command: >
+      /bin/sh -c "
+      echo 'Waiting for Ollama service to be ready...';
+      until curl -s -f http://ollama:11434/ > /dev/null; do
+        echo -n '.' && sleep 2;
+      done;
+      echo '\nOllama is ready. Pulling model \"tinyllama\"...';
+      curl -v http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
+      echo 'Model pull command sent. This container will now exit.';
+      "
+    # This just needs the ollama service to have started, not be healthy.
+    depends_on:
+      - ollama
 
 volumes:
   corpus_data: {}
