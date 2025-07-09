@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, All Custom Images Version)
+# /docker-compose.yml (Definitive, Corrected Command Version)
 
 services:
   nginx:
@@ -17,8 +17,10 @@ services:
       - ./server:/app
       - corpus_uploads:/app/uploads
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: >
       sh -c "flask init-db && 
              gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
@@ -36,26 +38,28 @@ services:
       - tika
       - chroma
       - ollama
+    # --- THIS IS THE FIX ---
+    # The comment has been removed. The command now starts correctly with "sh -c".
     command: >
-      # This command waits 25 seconds for all services to initialize before starting.
-      # This is more reliable than healthchecks in this environment.
       sh -c "echo 'Worker waiting for services...' &&
-             sleep 25 &&
+             sleep 30 &&
              echo 'Worker starting...' &&
              celery -A celery_worker.celery worker --loglevel=info"
+    # --- END OF FIX ---
 
   redis:
     image: redis:7-alpine
     container_name: corpus_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   tika:
-    # BUILD our custom, stable Tika image
-    build:
-      context: .
-      dockerfile: tika.Dockerfile
+    image: apache/tika:latest-full
     container_name: corpus_tika
-    ports:
-      - "9998:9998"
+    ports: ["9998:9998"]
 
   db:
     image: postgres:15
@@ -63,13 +67,16 @@ services:
     env_file: .env
     volumes:
       - corpus_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   chroma:
-    # Use the official image, but remove the failing healthcheck
     image: chromadb/chroma
     container_name: corpus_chroma
-    ports:
-      - "8000:8000"
+    ports: ["8000:8000"]
     volumes:
       - chroma_data:/chroma/.chroma/index
     environment:
@@ -77,13 +84,11 @@ services:
       - IS_PERSISTENT=TRUE
 
   ollama:
-    # BUILD our custom Ollama image with the model pre-baked
     build:
       context: .
       dockerfile: ollama.Dockerfile
     container_name: corpus_ollama
-    ports:
-      - "11434:11434"
+    ports: ["11434:11434"]
     volumes:
       - ollama_data:/root/.ollama
 
