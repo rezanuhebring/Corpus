@@ -75,23 +75,22 @@ services:
       timeout: 5s
       retries: 5
 
-  ollama:
-    build:
-      context: .
-      dockerfile: ollama.Dockerfile
-    container_name: corpus_ollama
-    volumes: ["ollama_data:/root/.ollama"]
-    tty: true
-    # The 'deploy' section for GPU has been removed.
-    # This environment variable is added to ensure compatibility with CPUs that lack AVX.
+  chroma:
+    image: chromadb/chroma:0.4.24
+    container_name: corpus_chroma
+    # FIX 1: The volume now points to the parent directory for simplicity.
+    volumes: ["chroma_data:/chroma"]
+    # FIX 2: Replaced IS_PERSISTENT with an explicit command to run the server.
+    # This is the modern, reliable way to ensure persistence.
+    command: ["--host", "0.0.0.0", "--port", "8000", "--path", "/chroma"]
     environment:
-      - OLLAMA_LLM_LIBRARY=/usr/local/lib/ollama/llm/cpu_avx_off
+      - ANONYMIZED_TELEMETRY=False 
+      # IS_PERSISTENT is no longer needed
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 30s
 
 volumes:
   corpus_data: {}
