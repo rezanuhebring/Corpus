@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Corrected Command Version)
+# /docker-compose.yml (Definitive, Corrected Commands Version)
 
 services:
   nginx:
@@ -21,6 +21,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # --- THIS IS THE FIX ---
+    # All comments are removed. The command is a clean shell command.
     command: >
       sh -c "flask init-db && 
              gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
@@ -39,13 +41,12 @@ services:
       - chroma
       - ollama
     # --- THIS IS THE FIX ---
-    # The comment has been removed. The command now starts correctly with "sh -c".
+    # All comments are removed. The command is a clean shell command.
     command: >
       sh -c "echo 'Worker waiting for services...' &&
              sleep 30 &&
              echo 'Worker starting...' &&
              celery -A celery_worker.celery worker --loglevel=info"
-    # --- END OF FIX ---
 
   redis:
     image: redis:7-alpine
@@ -84,13 +85,29 @@ services:
       - IS_PERSISTENT=TRUE
 
   ollama:
-    build:
-      context: .
-      dockerfile: ollama.Dockerfile
+    image: ollama/ollama
     container_name: corpus_ollama
     ports: ["11434:11434"]
     volumes:
       - ollama_data:/root/.ollama
+
+  ollama-model-puller:
+    image: curlimages/curl:latest
+    container_name: corpus_model_puller
+    # --- THIS IS THE FIX ---
+    # All comments are removed. The command is a clean shell command.
+    command: >
+      /bin/sh -c "
+      echo 'Waiting for Ollama...';
+      until curl -s -f http://ollama:11434/ > /dev/null; do
+        sleep 2;
+      done;
+      echo 'Pulling tinyllama model...';
+      curl http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
+      echo 'Model pull complete.';
+      "
+    depends_on:
+      - ollama
 
 volumes:
   corpus_data:
