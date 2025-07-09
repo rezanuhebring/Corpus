@@ -12,6 +12,10 @@ langdetect==1.0.9
 # AI / RAG LIBRARIES
 langchain==0.2.5
 langchain-community==0.2.5
-chromadb==0.4.24  # <-- THIS IS THE FIX
+chromadb==0.4.24
 tiktoken==0.7.0
 sentence-transformers==3.0.1
+
+# --- NEW: Job Queue Libraries ---
+celery==5.4.0
+redis==5.0.7

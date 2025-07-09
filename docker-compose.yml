@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Relaxed Startup Version)
+# /docker-compose.yml (Definitive CPU-Only Version)
 
 services:
   nginx:
@@ -17,30 +17,39 @@ services:
     env_file: .env
     volumes:
       - ./server:/app
-    # --- THIS IS THE KEY CHANGE ---
-    # We no longer wait for a 'service_healthy' condition.
-    # Instead, we just wait for the services to exist.
+      - corpus_uploads:/app/uploads
     depends_on:
+      - db
+      - redis
+    command: >
+      sh -c "flask init-db && 
+             gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
+
+  worker:
+    build: ./server
+    container_name: corpus_worker
+    env_file: .env
+    volumes:
+      - ./server:/app
+      - corpus_uploads:/app/uploads
+    depends_on:
+      - redis
       - db
       - tika
       - chroma
       - ollama
-    # The CMD is modified to wait 15 seconds before starting,
-    # giving the other services time to initialize.
-    command: >
-      sh -c "echo 'Waiting for other services to initialize...' && 
-             sleep 15 && 
-             echo 'Starting application...' && 
-             flask init-db && 
-             gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 app:app"
+    command: celery -A celery_worker.celery worker --loglevel=info
+
+  redis:
+    image: redis:7-alpine
+    container_name: corpus_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s; timeout: 5s; retries: 5
 
   tika:
     image: apache/tika:latest-full
     container_name: corpus_tika
-    ports:
-      - "9998:9998"
-    # We remove the healthcheck to prevent the 'unhealthy' error state.
-    # The web app's sleep command handles the startup delay.
 
   db:
     image: postgres:15
@@ -49,17 +58,12 @@ services:
     volumes:
       - corpus_data:/var/lib/postgresql/data
     healthcheck:
-      # We keep the DB healthcheck as it's very reliable.
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 10s; timeout: 5s; retries: 5
 
   chroma:
     image: chromadb/chroma
     container_name: corpus_chroma
-    ports:
-      - "8000:8000"
     volumes:
       - chroma_data:/chroma/.chroma/index
     environment:
@@ -73,18 +77,18 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    # NOTE: No special 'deploy' or 'runtime' keys are needed.
+    # Ollama automatically uses the CPU if no compatible GPU is found.
+    # The key is allocating enough RAM to the VM itself.
 
-  # The model puller is unchanged.
   ollama-model-puller:
     image: curlimages/curl:latest
     container_name: corpus_model_puller
     command: >
       /bin/sh -c "
       echo 'Waiting for Ollama...';
-      until curl -s -f http://ollama:11434/ > /dev/null; do
-        sleep 2;
-      done;
-      echo 'Pulling model...';
+      until curl -s -f http://ollama:11434/ > /dev/null; do sleep 2; done;
+      echo 'Pulling tinyllama model for CPU-only operation...';
       curl http://ollama:11434/api/pull -d '{ \"name\": \"tinyllama\" }';
       echo 'Model pull complete.';
       "
@@ -95,3 +99,4 @@ volumes:
   corpus_data:
   chroma_data:
   ollama_data:
+  corpus_uploads:
