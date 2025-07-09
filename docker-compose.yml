@@ -1,4 +1,3 @@
-sudo cat << EOF > docker-compose.yml
 # /docker-compose.yml (Definitive, Syntactically Correct Final Version)
 
 services:
@@ -114,4 +113,3 @@ volumes:
   chroma_data:
   ollama_data:
   corpus_uploads:
-EOF
