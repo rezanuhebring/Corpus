@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Syntactically Correct Final Version)
+# /docker-compose.yml (Final, Correct Nginx Mount)
 
 services:
   nginx:
@@ -6,9 +6,15 @@ services:
     container_name: corpus_nginx
     ports:
       - "80:80"
+    volumes:
+      # --- THIS IS THE FIX ---
+      # Using an absolute path variable ensures the file is always found.
+      - ${PWD}/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # --- END OF FIX ---
     depends_on:
       - web
 
+  # ... (all other services: web, worker, db, etc., remain exactly the same)
   web:
     build: ./server
     container_name: corpus_web_app
@@ -17,10 +23,8 @@ services:
       - ./server:/app
       - corpus_uploads:/app/uploads
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
     command: >
       sh -c "flask init-db && 
              gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
@@ -58,8 +62,7 @@ services:
       context: .
       dockerfile: tika.Dockerfile
     container_name: corpus_tika
-    ports:
-      - "9998:9998"
+    ports: ["9998:9998"]
 
   db:
     image: postgres:15
@@ -68,7 +71,6 @@ services:
     volumes:
       - corpus_data:/var/lib/postgresql/data
     healthcheck:
-      # --- THIS IS THE CORRECTED FORMAT ---
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
@@ -77,8 +79,7 @@ services:
   chroma:
     image: chromadb/chroma
     container_name: corpus_chroma
-    ports:
-      - "8000:8000"
+    ports: ["8000:8000"]
     volumes:
       - chroma_data:/chroma/.chroma/index
     environment:
@@ -90,8 +91,7 @@ services:
       context: .
       dockerfile: ollama.Dockerfile
     container_name: corpus_ollama
-    ports:
-      - "11434:11434"
+    ports: ["11434:11434"]
     volumes:
       - ollama_data:/root/.ollama
 
