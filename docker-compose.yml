@@ -82,22 +82,30 @@ services:
       retries: 5
 
   ollama:
-    build:
-      context: .
-      dockerfile: ollama.Dockerfile
+    # FIX 1: Revert to the standard, official image. No 'build' section needed.
+    image: ollama/ollama
     container_name: corpus_ollama
     volumes: ["ollama_data:/root/.ollama"]
     tty: true
-    # The 'deploy' section for GPU has been removed.
-    # This environment variable is added to ensure compatibility with CPUs that lack AVX.
+    # FIX 2: Use a robust startup command.
+    # This command runs inside the container on startup. It checks if 'tinyllama'
+    # is already downloaded. If not, it pulls it. Then, it starts the server.
+    # This is far more reliable than building the model into the image.
+    command: >
+      sh -c "
+      (ollama list | grep -q tinyllama || ollama pull tinyllama) &&
+      ollama serve
+      "
     environment:
+      # This is still useful for CPU compatibility.
       - OLLAMA_LLM_LIBRARY=/usr/local/lib/ollama/llm/cpu_avx_off
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # Give the container more time to start, as it might be downloading the model.
+      start_period: 300s
 
 volumes:
   corpus_data: {}
