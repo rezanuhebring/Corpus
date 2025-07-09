@@ -1,4 +1,4 @@
-# /docker-compose.yml (Definitive, Corrected Commands Version)
+# /docker-compose.yml (Final, Correct Nginx Mount)
 
 services:
   nginx:
@@ -6,6 +6,10 @@ services:
     container_name: corpus_nginx
     ports:
       - "80:80"
+    volumes:
+      # --- THIS IS THE FIX ---
+      # Using an absolute path variable ensures the file is always found.
+      - ${PWD}/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - web
 
@@ -21,8 +25,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # --- THIS IS THE FIX ---
-    # All comments are removed. The command is a clean shell command.
     command: >
       sh -c "flask init-db && 
              gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 'app:create_app()'"
@@ -40,8 +42,6 @@ services:
       - tika
       - chroma
       - ollama
-    # --- THIS IS THE FIX ---
-    # All comments are removed. The command is a clean shell command.
     command: >
       sh -c "echo 'Worker waiting for services...' &&
              sleep 30 &&
@@ -94,8 +94,6 @@ services:
   ollama-model-puller:
     image: curlimages/curl:latest
     container_name: corpus_model_puller
-    # --- THIS IS THE FIX ---
-    # All comments are removed. The command is a clean shell command.
     command: >
       /bin/sh -c "
       echo 'Waiting for Ollama...';
