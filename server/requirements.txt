@@ -1,12 +1,12 @@
 # /server/requirements.txt (Definitive Version)
 Flask==3.0.3
-gunicorn==22.0.0
+gunicorn==23.0.0
 Flask-SQLAlchemy==3.1.1
 Flask-Bcrypt==1.0.1
 psycopg2-binary==2.9.9
-requests==2.32.3
+requests==2.32.4
 langchain==0.2.5
-langchain-community==0.2.5
+langchain-community==0.2.19
 chromadb==0.4.24  # <-- THE CRITICAL FIX
 tiktoken==0.7.0
 sentence-transformers==3.0.1
